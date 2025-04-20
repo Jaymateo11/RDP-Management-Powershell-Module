@@ -1,0 +1,43 @@
+# PowerShell Module specific
+*.psm1.bak
+*.psd1.bak
+*.ps1.bak
+
+# PowerShell output/temp files
+output/
+temp/
+*.log
+
+# Package Management
+packages/
+*.nupkg
+
+# PowerShell development tools
+*.pssproj
+*.sln
+*.suo
+*.user
+*.vscode
+.vscode/*
+.vs/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*~
+*.swp
+.temp/
+
+# Testing files
+TestResults.xml
+coverage.xml
+.coverage/
+
+# Internal test files
+tests/results/
+tests/temp/
+

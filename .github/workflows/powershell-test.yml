@@ -1,0 +1,88 @@
+name: PowerShell Module Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test PowerShell Module
+    runs-on: windows-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Check PowerShell version
+        shell: pwsh
+        run: $PSVersionTable
+      
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Force
+      
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings PSGallery -ExcludeRule PSAvoidUsingWriteHost
+          $results | Format-Table -AutoSize
+          
+          if ($results.Count -gt 0) {
+            Write-Warning "PSScriptAnalyzer found $($results.Count) issues. Review isn't failing the build at this time."
+          }
+          
+          # Uncomment the following line to make the pipeline fail if PSScriptAnalyzer finds critical issues
+          # if ($results.Where({$_.Severity -eq 'Error'}).Count -gt 0) { throw "PSScriptAnalyzer found critical issues that must be fixed." }
+      
+      - name: Validate Module Structure
+        shell: pwsh
+        run: |
+          $manifestPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "RDPManagement.psd1"
+          $moduleExists = Test-Path -Path $manifestPath
+          
+          if (-not $moduleExists) {
+            throw "Module manifest not found at $manifestPath"
+          }
+          
+          $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+          
+          if (-not $manifest) {
+            throw "Module manifest is invalid or could not be read."
+          }
+          
+          Write-Output "Module validation succeeded:"
+          Write-Output "  Name: $($manifest.Name)"
+          Write-Output "  Version: $($manifest.Version)"
+          Write-Output "  Description: $($manifest.Description)"
+      
+      - name: Test Module Import
+        shell: pwsh
+        run: |
+          try {
+            # This will run in non-admin mode, so we need to handle the #requires statement
+            $ErrorActionPreference = 'Continue'
+            # Load each script file individually to check syntax
+            $scriptFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.ps1" | Where-Object { $_.Name -notlike "*.Tests.ps1" }
+            
+            foreach ($scriptFile in $scriptFiles) {
+              Write-Output "Checking syntax for: $($scriptFile.Name)"
+              $syntaxErrors = $null
+              [System.Management.Automation.PSParser]::Tokenize((Get-Content -Path $scriptFile.FullName -Raw), [ref]$syntaxErrors)
+              
+              if ($syntaxErrors.Count -gt 0) {
+                throw "Syntax errors found in $($scriptFile.Name)"
+              }
+              
+              Write-Output "  Syntax check passed"
+            }
+            
+            Write-Output "All script files passed syntax check"
+          }
+          catch {
+            Write-Error "Module testing failed: $_"
+            throw
+          }
+
