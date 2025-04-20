@@ -1,0 +1,146 @@
+name: Code Quality Check
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.ps1'
+      - '**.psd1'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.ps1'
+      - '**.psd1'
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: PowerShell Code Quality
+    runs-on: windows-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v1
+        with:
+          powershell-version: '7.2'
+      
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Force
+          Install-Module -Name Pester -Force
+      
+      - name: Run Code Style Analysis
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings PSGallery
+          
+          # Group results by rule name
+          $ruleStats = $results | Group-Object -Property RuleName | Select-Object Name, Count
+          
+          Write-Output "Code Style Analysis Results:"
+          $ruleStats | Format-Table -AutoSize
+          
+          Write-Output "Total style issues found: $($results.Count)"
+          
+          # Detailed report for specific types of issues
+          $severityIssues = $results | Group-Object -Property Severity | Select-Object Name, Count
+          $severityIssues | Format-Table -AutoSize
+          
+          # Export results to file
+          $results | Export-Csv -Path style-issues.csv -NoTypeInformation
+          
+          Write-Output "Detailed issues exported to style-issues.csv"
+          
+          # Sample report
+          if ($results.Count -gt 0) {
+            Write-Output "`nTop 5 issues (sample):"
+            $results | Select-Object -First 5 | Format-Table -Property Severity, RuleName, Line, Message -AutoSize
+          }
+      
+      - name: Measure Code Complexity
+        shell: pwsh
+        run: |
+          $scriptFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.ps1" -Recurse
+          
+          $complexityReport = @()
+          
+          foreach ($file in $scriptFiles) {
+            $fileContent = Get-Content -Path $file.FullName -Raw
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($fileContent, [ref]$null, [ref]$null)
+            $functions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+            
+            foreach ($function in $functions) {
+              $functionName = $function.Name
+              $functionText = $function.Extent.Text
+              
+              # Simple complexity metrics
+              $ifCount = ([regex]::Matches($functionText, '\bif\b')).Count
+              $forEachCount = ([regex]::Matches($functionText, '\bforeach\b')).Count
+              $forCount = ([regex]::Matches($functionText, '\bfor\b')).Count
+              $whileCount = ([regex]::Matches($functionText, '\bwhile\b')).Count
+              $switchCount = ([regex]::Matches($functionText, '\bswitch\b')).Count
+              $tryCount = ([regex]::Matches($functionText, '\btry\b')).Count
+              $catchCount = ([regex]::Matches($functionText, '\bcatch\b')).Count
+              
+              # Estimate cyclomatic complexity
+              $complexity = 1 + $ifCount + $forEachCount + $forCount + $whileCount + $switchCount + $catchCount
+              
+              # Simple LOC count
+              $loc = ($functionText -split "`n").Count
+              
+              $complexityReport += [PSCustomObject]@{
+                File = $file.Name
+                Function = $functionName
+                LOC = $loc
+                Complexity = $complexity
+                IfStatements = $ifCount
+                Loops = ($forEachCount + $forCount + $whileCount)
+                TryCatch = $tryCount
+              }
+            }
+          }
+          
+          # Display complexity report
+          Write-Output "Function Complexity Report:"
+          $complexityReport | Sort-Object -Property Complexity -Descending | Format-Table -AutoSize
+          
+          # Identify potentially complex functions
+          $complexFunctions = $complexityReport | Where-Object { $_.Complexity -gt 10 -or $_.LOC -gt 100 }
+          
+          if ($complexFunctions.Count -gt 0) {
+            Write-Output "`nPotentially complex functions that may need refactoring:"
+            $complexFunctions | Format-Table -AutoSize
+          } else {
+            Write-Output "`nNo overly complex functions identified. Good job!"
+          }
+      
+      - name: Check Code Coverage
+        shell: pwsh
+        run: |
+          Write-Output "Simulating code coverage check..."
+          
+          # This is a placeholder for actual code coverage.
+          # In a real project, you would run Pester tests with code coverage
+          # Example:
+          # $testResults = Invoke-Pester -Path ./tests -CodeCoverage ./RDP*.ps1 -PassThru
+          # $coverage = $testResults.CodeCoverage.NumberOfCommandsExecuted / $testResults.CodeCoverage.NumberOfCommandsAnalyzed
+          
+          Write-Output "Note: To implement actual code coverage, add Pester tests and enable CodeCoverage parameter."
+          Write-Output "Example coverage calculation:"
+          Write-Output "  Commands Executed: X"
+          Write-Output "  Commands Analyzed: Y"
+          Write-Output "  Coverage: X/Y = Z%"
+          
+          # For demonstration purposes only
+          Write-Output "`nSimulated Code Coverage Report:"
+          $simulatedModules = @(
+            [PSCustomObject]@{Module="RDPSessionManagement.ps1"; Coverage="85%"; UncoveredLines="25-30, 42-45"}
+            [PSCustomObject]@{Module="RDPAccessControl.ps1"; Coverage="78%"; UncoveredLines="112-120, 180-195"}
+          )
+          
+          $simulatedModules | Format-Table -AutoSize
+

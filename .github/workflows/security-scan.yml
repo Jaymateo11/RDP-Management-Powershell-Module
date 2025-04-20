@@ -1,0 +1,85 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Run every Sunday at midnight
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  security-scan:
+    name: PowerShell Security Analysis
+    runs-on: windows-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v1
+        with:
+          powershell-version: '7.2'
+      
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Force
+      
+      - name: Run PSScriptAnalyzer Security Analysis
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings PSGallery -Severity Error, Warning -ExcludeRule PSAvoidUsingWriteHost
+          $securityRules = @(
+            'PSAvoidUsingPlainTextForPassword',
+            'PSAvoidUsingConvertToSecureStringWithPlainText',
+            'PSAvoidUsingInvokeExpression',
+            'PSUseDeclaredVarsMoreThanAssignments',
+            'PSUseApprovedVerbs',
+            'PSAvoidUsingUserNameAndPasswordParams',
+            'PSUsePSCredentialType'
+          )
+          
+          $securityIssues = $results | Where-Object { $securityRules -contains $_.RuleName }
+          $securityIssues | Format-Table -AutoSize
+          
+          Write-Output "Security scan found $($securityIssues.Count) security issues."
+          
+          if ($securityIssues.Count -gt 0) {
+            Write-Warning "Security issues detected! Review required."
+            
+            # Comment the following line if you want to make the pipeline fail on security issues
+            # exit 1
+          }
+      
+      - name: Dependency Check
+        shell: pwsh
+        run: |
+          # Check module dependencies
+          $manifestPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "RDPManagement.psd1"
+          $manifest = Import-PowerShellDataFile -Path $manifestPath
+          
+          Write-Output "Checking required modules:"
+          $requiredModules = @($manifest.RequiredModules)
+          foreach ($module in $requiredModules) {
+            if ($module -is [string]) {
+              $moduleName = $module
+              Write-Output "  - $moduleName (any version)"
+            } else {
+              $moduleName = $module.ModuleName
+              $moduleVersion = $module.ModuleVersion
+              Write-Output "  - $moduleName (v$moduleVersion)"
+            }
+          }
+          
+          # Check for potentially problematic assembly dependencies
+          $scriptFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.ps1" -Recurse
+          $assemblyReferences = Select-String -Path $scriptFiles.FullName -Pattern "Add-Type.*-AssemblyName|Add-Type.*-Path|Add-Type.*-LiteralPath|LoadWithPartialName|ReflectionOnlyLoad|UnsafeLoadFrom|Load" -AllMatches
+          
+          if ($assemblyReferences.Count -gt 0) {
+            Write-Output "Potential assembly dependencies detected:"
+            foreach ($match in $assemblyReferences) {
+              Write-Output "  - $($match.Path): $($match.Line.Trim())"
+            }
+          } else {
+            Write-Output "No explicit assembly dependencies detected."
+          }
+

@@ -1,0 +1,65 @@
+name: Publish to PowerShell Gallery
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish to PowerShell Gallery
+    runs-on: windows-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v1
+        with:
+          powershell-version: '7.2'
+      
+      - name: Verify Module Manifest
+        shell: pwsh
+        run: |
+          $manifestPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "RDPManagement.psd1"
+          $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
+          Write-Output "Verified module: $($manifest.Name) v$($manifest.Version)"
+      
+      - name: Check Release Tag
+        shell: pwsh
+        run: |
+          $manifestPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "RDPManagement.psd1"
+          $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
+          $version = $manifest.Version.ToString()
+          $tag = "${{ github.event.release.tag_name }}"
+          
+          if ($tag -notmatch "v$version") {
+            Write-Error "Release tag ($tag) does not match module version (v$version)"
+            exit 1
+          }
+          
+          Write-Output "Release tag matches module version: $version"
+      
+      - name: Prepare Module Directory
+        shell: pwsh
+        run: |
+          # Create a directory to prepare the module for publishing
+          $publishDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "publish/RDPManagement"
+          New-Item -Path $publishDir -ItemType Directory -Force | Out-Null
+          
+          # Copy module files to publish directory
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/*.ps1" -Destination $publishDir
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/*.psd1" -Destination $publishDir
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/README.md" -Destination $publishDir
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/LICENSE" -Destination $publishDir
+          
+          # Display content
+          Get-ChildItem -Path $publishDir -Recurse | Select-Object FullName
+      
+      - name: Publish to PowerShell Gallery
+        shell: pwsh
+        run: |
+          $modulePath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "publish/RDPManagement"
+          Publish-Module -Path $modulePath -NuGetApiKey ${{ secrets.PS_GALLERY_API_KEY }} -Verbose
+        env:
+          PS_GALLERY_API_KEY: ${{ secrets.PS_GALLERY_API_KEY }}
+
